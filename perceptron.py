@@ -4,6 +4,7 @@ import re
 import random
 import sys
 import string
+import numpy
 
 
 class Post(object):    
@@ -24,10 +25,10 @@ class Post(object):
 		return 'Username: ' + self.username + ', Post ID: ' + str(self.postid) + '\nMessage: ' + self.message 
 
 	def strip_words(self, message_words_list):
-		new_list = []
+		new_set = set()
 		for word in message_words_list:
-			new_list.append(word.strip(string.punctuation))
-		return new_list
+			new_set.add(word.strip(string.punctuation))
+		return new_set
 
 class TrainingExample:
 	# constructor
@@ -75,8 +76,7 @@ def add_to_dictionary(d_file, master_dictionary):
 	file_processing(entries, data_file)
 	for post in entries:
 		for word in post.message_words:
-			if word not in master_dictionary:
-				master_dictionary.append(word)
+			master_dictionary.add(word)
 
 def annotation_processing(features_grid, annotation_file_in):
 	
@@ -85,70 +85,62 @@ def annotation_processing(features_grid, annotation_file_in):
 	for line in annotation_file_in:
 		links = re.findall(r'\d+', line)
 		for link in range(1, len(links)):	
-
 			features_grid[int(links[0])][int(links[link])].correct_prediction = 1
 
 def generate_features(current_post, prev_post, compiled_dictionary):
 
-
+	features = numpy.zeros(13 + len(compiled_dictionary))
 	
 
-	features = [0] * 4
+	
 	# correct classification held in element zero
 	# features begin at element one
 	
 	# bias
 	features[0] = 1
-
 	# 'distance' categories
 	distance = current_post.postid - prev_post.postid
 	if distance == 1:
 		features[1] = 1
 	elif distance < 6:
 		features[2] = 1
-	else:
+	elif distance < 21:
 		features[3] = 1
+	elif distance < 51:
+		features[4] = 1
+	else: 
+		features[5] = 1
+
 
 	# compare usernames
 	if prev_post.username == current_post.username:
-		features.append(1)
-	else:
-		features.append(0)
+		features[6] = 1	
 	
 	# if current message contains username of previous poster
 	if prev_post.username in current_post.message_words:
-		features.append(1)
-	else:
-		features.append(0)
+		features[7] = 1
 
 	# if previous message contains username of current poster
 	if current_post.username in prev_post.message_words:
-		features.append(1)
-	else:
-		features.append(0)
+		features[8] = 1
+	
 
 	size_intersection = len(set(prev_post.message_words).intersection(set(current_post.message_words)))
-	features.append(0)
-	features.append(0)
-	features.append(0)
-	features.append(0)
+	
 	if size_intersection == 0:
-		features[len(features) - 4] = 1
+		features[9] = 1
 	elif size_intersection == 1:
-		features[len(features) - 3] = 1
+		features[10] = 1
 	elif size_intersection < 6:
-		features[len(features) - 2] = 1
+		features[11] = 1
 	else:
-		features[len(features) - 1] = 1
+		features[12] = 1
 
-
-
+	index = 13
 	for i in compiled_dictionary:
 		if i in prev_post.message_words and i in current_post.message_words:
-			features.append(1)
-		else:
-			features.append(0)
-
+			features[index] = 1			
+		index += 1
 
 	return features
 	
@@ -166,16 +158,16 @@ def create_training_set(d_file, a_file, compiled_training_set, compiled_dictiona
 	
 	
 	# generate features for every prediction possibility and store in feature grid
-	for i in range(dim):		
+	for i in range(100, dim):		
 		for j in range(i):
-			# generate training example features				
+			# generate training example features	
 			features_grid[i][j] = TrainingExample(i, j, generate_features(entries[i], entries[j], compiled_dictionary))	
 
 	# add correct classification to zeroth element of features vector
 	annotation_processing(features_grid, annotation_file)
 
 	# add all valid training examples from current file to compiled training examples list
-	for i in range(len(features_grid)):
+	for i in range(100, dim):
 		for j in range(i): 				
 			compiled_training_set.append(features_grid[i][j])	
 
@@ -218,6 +210,9 @@ def calculate_predictions(weights, test_set_file, correct_predictions, compiled_
 	create_training_set(test_set_file, correct_predictions, test_set, compiled_dictionary)	
 
 	correct_matches = 0
+	true_pos = 0
+	false_pos = 0
+	false_neg = 0
 	
 	# determine diff in prediction vs actual but don't update weights
 	for i in range(len(test_set)):
@@ -225,11 +220,24 @@ def calculate_predictions(weights, test_set_file, correct_predictions, compiled_
 		prediction = make_prediction(weights, test_set[i].features)		
 		diff = test_set[i].correct_prediction - prediction
 
+		# if prediction was correct
 		if diff == 0:
 			correct_matches += 1
+			if prediction == 1:
+				true_pos += 1
 
-	print ("Agreement proportion:")
-	print (correct_matches/len(test_set))
+		else:
+			if prediction == 1:
+				false_pos += 1
+			else:
+				false_neg += 1
+	accuracy = correct_matches/len(test_set)
+	precision = true_pos / (true_pos + false_pos)
+	recall = true_pos / (true_pos + false_neg)
+	fscore = 2 * precision * recall / (precision + recall)
+
+
+	print ("Accuracy: " + str(accuracy) + "\nPrecision: " + str(precision) + "\nRecall: " + str(recall) + "\nFscore:" + str(fscore))
 
 def generate_annotation_file(weights, d_file, a_file, compiled_dictionary):
 
@@ -263,7 +271,9 @@ def generate_annotation_file(weights, d_file, a_file, compiled_dictionary):
 if __name__ == "__main__":			
 
 	compiled_training_set = []
-	compiled_dictionary = []
+	compiled_dictionary = set()
+
+
 
 	# index of every data file from argv
 	# command line arguments are in <data_file, annotation_file>
@@ -274,22 +284,26 @@ if __name__ == "__main__":
 		exit()
 
 	for k in range(len(sys.argv)//2 - 1):
-
+		print ("adding to dictionary")
 		add_to_dictionary(sys.argv[2*k+1], compiled_dictionary)
 
-	
+	compiled_dictionary = list(compiled_dictionary)
+
 	for k in range(len(sys.argv)//2 - 1):
+		print("creating training set")
 		create_training_set(sys.argv[2*k+1], sys.argv[2*k+2], compiled_training_set, compiled_dictionary)
 
 	# create zero-initialized list of same length as feature set
-	weights = [0] * len(compiled_training_set[0].features)
-
-	epochs = 3
+	weights = numpy.zeros(len(compiled_training_set[0].features))
+	'''
+	epochs = 1
 	for i in range(epochs):
+		print ("epoch " + str(i) + "of perceptron training")
 		train_perceptron(weights, compiled_training_set)
 
-
+	print("testing perceptron and calculating predictions")
 	calculate_predictions(weights, sys.argv[len(sys.argv)-2], sys.argv[len(sys.argv)-1], compiled_dictionary)
+	print("generating output file")
 	generate_annotation_file(weights, sys.argv[len(sys.argv)-2], sys.argv[len(sys.argv)-1], compiled_dictionary)
 	
-
+'''
