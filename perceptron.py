@@ -5,7 +5,7 @@ import random
 import sys
 import string
 import numpy
-
+numpy.set_printoptions(threshold=numpy.nan)
 
 class Post(object):    
 	# constructor
@@ -175,8 +175,7 @@ def make_prediction(weights, features):
 
 	summation = 0
 		
-	for feature in range(0, len(features)):			
-		summation += weights[feature] * features[feature]
+	summation = numpy.dot(weights, features)
 
 	activation = 1
 
@@ -194,10 +193,9 @@ def train_perceptron(weights, compiled_training_set):
 		prediction = make_prediction(weights, compiled_training_set[i].features)
 		
 		diff = compiled_training_set[i].correct_prediction - prediction
-
-		# update weights if diff is non-zero
-		for feature in range(0, len(compiled_training_set[0].features)):	
-			weights[feature] += diff*compiled_training_set[i].features[feature]	
+		
+		weights += numpy.multiply(diff,compiled_training_set[i].features)
+		
 
 
 def calculate_predictions(weights, test_set_file, correct_predictions, compiled_dictionary):
@@ -295,15 +293,18 @@ if __name__ == "__main__":
 
 	# create zero-initialized list of same length as feature set
 	weights = numpy.zeros(len(compiled_training_set[0].features))
-	'''
+	
 	epochs = 1
 	for i in range(epochs):
 		print ("epoch " + str(i) + "of perceptron training")
 		train_perceptron(weights, compiled_training_set)
+		if(i // 100000 == 0):
+			print(weights)
 
+	print("PRINTING THE WEIGHTS IN MAIN")
+	print (weights)
 	print("testing perceptron and calculating predictions")
 	calculate_predictions(weights, sys.argv[len(sys.argv)-2], sys.argv[len(sys.argv)-1], compiled_dictionary)
 	print("generating output file")
 	generate_annotation_file(weights, sys.argv[len(sys.argv)-2], sys.argv[len(sys.argv)-1], compiled_dictionary)
 	
-'''
