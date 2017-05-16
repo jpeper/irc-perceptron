@@ -1,12 +1,10 @@
-irc-perceptron
-Repository used to hold 
-Usage:
-<programName.py> <training.list> <testing.list> <finalBenchmark.list>
+Repository used to hold implementations of perceptron models for Ubuntu disentanglement project.
+Usage: <programName.py> <training.list> <testing.list> <finalBenchmark.list>
 
 The file lists contain the files names (in pairs consisting of data files followed directly by the corresponding annotation file) of the files used for their respective purposes.
 
 Parameters than can be modified within program code: (all parameters are initializd at top of code for easy access)
-Perceptron, Averaged Perceptron, Structured Perceptron: number of epochs:
+Perceptron, Averaged Perceptron, Structured Perceptron: number of epochs
 AdaGrad Model: number of epochs, learning rate, regularization constant, delta constant
 
 The programs will output the performance metrics for both testing and training after each epoch.
