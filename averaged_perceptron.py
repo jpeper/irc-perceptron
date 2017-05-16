@@ -1,9 +1,5 @@
-# implementation of adaptive gradient model for ubuntu disentanglement project
-
-LEARN_RATE = 2
-REG_CONSTANT = 1E-7
-DELTA_CONSTANT = 1E-6
-EPOCHS = 5
+# implementation of averaged perceptron model for ubuntu disentanglement project
+EPOCHS = 10
 
 import re
 import random
@@ -11,10 +7,7 @@ import sys
 import string
 import numpy
 import collections
-import math 
-
 numpy.set_printoptions(threshold=numpy.nan)
-
 
 class Post(object):    
     # constructor
@@ -31,8 +24,6 @@ class Post(object):
         self.raw_line = raw_line
         # set containing the line number of every message this post is linked to
         self.links = set()
-
-        self.predictions = set()
 
     def __str__(self):
         return 'Username: ' + self.username + ', Post ID: ' + str(self.postid) + '\nMessage: ' + self.message 
@@ -55,7 +46,8 @@ class TrainingExample:
         self.prediction = prediction
 
     
-def file_processing(entries, file_in):    
+def file_processing(entries, file_in):
+    
     ''' 
     Example of typical line:
     [08:11] <Peppernrino> Hello everyone!
@@ -105,10 +97,8 @@ def annotation_processing(entries, annotation_file_in):
 
 def generate_features(current_post, prev_post, post_file, compiled_dictionary, linked_pairs):
 
-    features = numpy.zeros(18)
-    if current_post == None:
-        return features;
-    #features = numpy.zeros(18 + 2 * len(linked_pairs), bool)
+    #features = numpy.zeros(13, bool)
+    features = numpy.zeros(18 + 3 * len(linked_pairs), bool)
     
     # correct classification held in element zero
     # features begin at element one
@@ -167,22 +157,22 @@ def generate_features(current_post, prev_post, post_file, compiled_dictionary, l
         features[17] = 1
 
     index = 18
-    '''
+    
     hash_range = len(linked_pairs)
     for i in prev_post.message_words:
         for j in current_post.message_words:
             if (i, j) in linked_pairs:
                 features[index + linked_pairs[(i,j)]] = 1
             else:
-                features[index + len(linked_pairs) + (hash(i+j) % len(linked_pairs))] = 1
-    '''
+                features[index + len(linked_pairs) + (hash(i+j) % (2*len(linked_pairs)))] = 1
+    
     '''
     for i in compiled_dictionary:
         if i in prev_post.message_words and i in current_post.message_words:
             features[index + compiled_dictionary[i]] = 1      
     '''
     
-    return features    
+    return features
     
 def create_message_file(d_file, a_file):
     
@@ -199,140 +189,116 @@ def create_message_file(d_file, a_file):
     annotation_processing(entries, annotation_file)
     return entries
 
-def make_structured_prediction(weights, msg_file, msg_line, compiled_dictionary, linked_pairs, links = set()):
+def make_prediction(pred_weights, features):
 
     summation = 0
-    max_index = -1
+        
+    summation = numpy.dot(pred_weights, features)
 
-    for prev_msg_line in reversed(range(msg_line)):
-        features = generate_features(msg_file[msg_line], msg_file[prev_msg_line], msg_file, compiled_dictionary, linked_pairs)
-        temp_sum = numpy.dot(weights, features)
-        if prev_msg_line not in links:
-            temp_sum += 1
-        if temp_sum > summation:
-            summation = temp_sum
-            max_index = prev_msg_line    
-    return max_index   
+    activation = 0
 
+    if summation > 0:
+        activation = 1
 
+    return activation
 
-def update_active(w, g, q):
-    #print(w)
-    value = ((w * math.sqrt(q)) - (LEARN_RATE * g))/((LEARN_RATE * REG_CONSTANT) + math.sqrt(q))
-    #print (value)
-    #print ("\n\n")
-    return value
-
-def train_perceptron(weights, cuml_gradient, enumerated_examples, files, compiled_dictionary, linked_pairs):
+def train_perceptron(weights, running_weights, running_count, enumerated_examples, files, compiled_dictionary, linked_pairs):
 
     correct_matches = 0
+    num_examples = 0
     true_pos = 0
     false_pos = 0
-    false_neg = 0   
-    true_neg = 0          
-    num_examples = 0
+    false_neg = 0 
 
     random.shuffle(enumerated_examples)
-    
+
     for i in range(len(enumerated_examples)):
-
-        if i % 1000 == 0:
+        if i % ((len(enumerated_examples) - (len(enumerated_examples) % 1000)) // 10)  == 0:
             print("training on example " + str(i))
-            #print(cuml_gradient)
-
-
-        temp_prediction_set = set()
+        running_count += 1
+        
         file_num = enumerated_examples[i][0]
         msg_line = enumerated_examples[i][1]
-        num_examples += msg_line
-        #print("links are" + str(files[file_num][msg_line].links) )
-        prediction_index = make_structured_prediction(weights, files[file_num], msg_line, compiled_dictionary, linked_pairs, files[file_num][msg_line].links)
-        
-        if prediction_index > -1:
-            temp_prediction_set.add(prediction_index)
+        prev_msg_line = enumerated_examples[i][2]
 
-        correct_index = -1
-        if files[file_num][msg_line].links:
-            if prediction_index in files[file_num][msg_line].links:
-                correct_index = prediction_index
+
+        features = generate_features(files[file_num][msg_line], files[file_num][prev_msg_line], files[file_num], compiled_dictionary, linked_pairs)
+
+        prediction = make_prediction(weights, features)
+        
+        correct_prediction = 0
+        if prev_msg_line in files[file_num][msg_line].links:
+            correct_prediction = 1
+
+        num_examples += 1
+
+        diff = correct_prediction - prediction
+        if diff != 0:
+            weights += numpy.multiply(diff,features)
+            running_weights += numpy.multiply(1/running_count, weights - running_weights)
+            if prediction == 1:
+                false_pos += 1
             else:
-                correct_index = random.choice(tuple(files[file_num][msg_line].links))        
-        
-        
-        correct_features = 0
-        prediction_features = 0
-        
-        if correct_index == -1:
-            correct_features = generate_features(None, None, None, None, None)
-        else: 
-            correct_features = generate_features(files[file_num][msg_line], files[file_num][correct_index], files[file_num], compiled_dictionary, linked_pairs)
-        
-        if prediction_index == -1:
-            prediction_features = generate_features(None, None, None, None, None)
+                false_neg += 1
+
         else:
-            prediction_features = generate_features(files[file_num][msg_line], files[file_num][prediction_index], files[file_num], compiled_dictionary, linked_pairs)
+            correct_matches += 1
+            if prediction == 1:
+                true_pos += 1
 
-
-        gradient = prediction_features - correct_features
-
-        cuml_gradient += numpy.square(gradient)
-
-        #weights += correct_features - prediction_features
-        for elt in range(len(weights)):
-            weights[elt] = update_active(weights[elt], gradient[elt], cuml_gradient[elt])
-
-        
-        true_pos += len(temp_prediction_set.intersection(files[file_num][msg_line].links))
-        false_pos += len(temp_prediction_set.difference(files[file_num][msg_line].links))
-        false_neg += len(files[file_num][msg_line].links.difference(temp_prediction_set))
-        true_neg += msg_line - len(temp_prediction_set.union(files[file_num][msg_line].links))
     
-   
-    
-    accuracy = (true_pos + true_neg)/num_examples
+    accuracy = correct_matches/num_examples
     precision = true_pos / (true_pos + false_pos)
     recall = true_pos / (true_pos + false_neg)
     fscore = 2 * precision * recall / (precision + recall)
 
+    print("Training accuracy: " + str(accuracy) + "\nTraining precision:" + str(precision) + "\nTraining recall:" + str(recall) + "\nTraining fscore: " + str(fscore))
 
-    print ("Training Accuracy: " + str(accuracy) + "\nTraining Precision: " + str(precision) + "\nTraining Recall: " + str(recall) + "\nTraining Fscore:" + str(fscore))
-   
-        
-def calculate_predictions(weights, testing_list, compiled_dictionary, linked_pairs):
+    return running_count
 
+def calculate_predictions(calc_weights, testing_list, compiled_dictionary, linked_pairs):
+
+    # generate test set from file
+    
     correct_matches = 0
+    num_examples = 0
     true_pos = 0
     false_pos = 0
-    false_neg = 0   
-    true_neg = 0  
-        
-    num_examples = 0
+    false_neg = 0    
 
     for k in range(0, len(testing_list), 2):
-
         print("Working on test file " + str(k//2 + 1) + " of " + str(len(testing_list)//2))
         test_set = create_message_file(testing_list[k], testing_list[k+1])  
-
+        
+        
+        # determine diff in prediction vs actual but don't update weights
         for message in range(100, len(test_set)):
-            num_examples += message
+            for prev_message in range(message):       
+                num_examples += 1
+                features = generate_features(test_set[message], test_set[prev_message], test_set, compiled_dictionary, linked_pairs)
 
-            prediction_index = make_structured_prediction(weights, test_set, message, compiled_dictionary, linked_pairs)
-            if prediction_index > -1:
-                test_set[message].predictions.add(prediction_index)
-            '''
-            print("prediction index")
-            print(prediction_index)
-            print("potential correct options")
-            print(test_set[message].links)
-            '''
-            #print (test_set_files[0][message].predictions, test_set_files[0][message].links)
-            true_pos += len(test_set[message].predictions.intersection(test_set[message].links))
-            false_pos += len(test_set[message].predictions.difference(test_set[message].links))
-            false_neg += len(test_set[message].links.difference(test_set[message].predictions))
-            true_neg += message - len(test_set[message].predictions.union(test_set[message].links))
+                prediction = make_prediction(calc_weights, features)     
+                
+                correct_prediction = 0
+                if prev_message in test_set[message].links:
+                    correct_prediction = 1
 
+                diff = correct_prediction - prediction
+
+                # if prediction was correct
+                if diff == 0:
+                    correct_matches += 1
+                    if prediction == 1:
+                        true_pos += 1
+
+                else:
+                    if prediction == 1:
+                        false_pos += 1
+                    else:
+                        false_neg += 1   
     
-    accuracy = (true_pos + true_neg)/num_examples
+
+    accuracy = correct_matches/num_examples
     precision = true_pos / (true_pos + false_pos)
     recall = true_pos / (true_pos + false_neg)
     fscore = 2 * precision * recall / (precision + recall)
@@ -343,32 +309,28 @@ def calculate_predictions(weights, testing_list, compiled_dictionary, linked_pai
 
 def generate_annotation_file(weights, benchmark_list, compiled_dictionary, linked_pairs):
 
-
     for k in range(0, len(benchmark_list), 2):
-
-        # generate test set from file
         test_set = create_message_file(benchmark_list[k], benchmark_list[k+1])  
         output_dict = {}
 
-        
         # determine diff in prediction vs actual but don't update weights
-        output_file_name = benchmark_list[k] + ".annotated.adagrad"
-        f = open(output_file_name, 'w')
-        print("outputting to " + output_file_name)
-
         for message in range(100, len(test_set)):
-            
-            prediction_index = make_structured_prediction(weights, test_set, message, compiled_dictionary, linked_pairs)
-            if prediction_index > -1:
-                test_set[message].predictions.add(prediction_index)
+            for prev_message in range(message):       
+                
+                features = generate_features(test_set[message], test_set[prev_message], test_set, compiled_dictionary, linked_pairs)
+                prediction = make_prediction(weights, features)  
+                if prediction == 1:
+                    output_dict.setdefault(message, []).append(prev_message) 
 
-            if test_set[message].predictions:
-                output = str(message) + ' -'
-                for val in test_set[message].predictions:
-                    output += ' ' + str(val)
-                output += '\n'
-                f.write(output)
+        output_file_name = benchmark_list[k] + ".annotated.averaged"
+        f = open(output_file_name, 'w')
 
+        for line in output_dict:
+            output = str(line) + ' -'
+            for val in output_dict[line]:
+                output += ' ' + str(val)
+            output += '\n'
+            f.write(output)
 
 def create_pairs(enumerated_examples, linked_pairs, files):
 
@@ -376,20 +338,18 @@ def create_pairs(enumerated_examples, linked_pairs, files):
     for i in range(len(enumerated_examples)):
         file_num = enumerated_examples[i][0]
         msg_line = enumerated_examples[i][1]
-        
+        prev_msg_line = enumerated_examples[i][2]
 
-        for prev_msg_line in range(msg_line):
-            if prev_msg_line in files[file_num][msg_line].links:
-                for wordA in files[file_num][prev_msg_line].message_words:
-                    for wordB in files[file_num][msg_line].message_words:
-                        if (wordA != files[file_num][msg_line].username and wordB != files[file_num][prev_msg_line].username):
-                            pair_tuple = (wordA, wordB)
-                            if(pair_tuple not in linked_pairs):
-                                linked_pairs[pair_tuple] = [location, 1]
-                                location += 1
-                            else:
-                                linked_pairs[pair_tuple][1] += 1
-
+        if prev_msg_line in files[file_num][msg_line].links:
+            for wordA in files[file_num][prev_msg_line].message_words:
+                for wordB in files[file_num][msg_line].message_words:
+                    if (wordA != files[file_num][msg_line].username and wordB != files[file_num][prev_msg_line].username):
+                        pair_tuple = (wordA, wordB)
+                        if(pair_tuple not in linked_pairs):
+                            linked_pairs[pair_tuple] = [location, 1]
+                            location += 1
+                        else:
+                            linked_pairs[pair_tuple][1] += 1
 
 def remove_overfitted_pairs(linked_pairs):
     new_pairs = collections.OrderedDict()
@@ -401,10 +361,9 @@ def remove_overfitted_pairs(linked_pairs):
 
     return new_pairs
 
-
+       
 if __name__ == "__main__":          
 
-    
     training_files = []
     compiled_dictionary = collections.OrderedDict()
     dictionary_index = 0
@@ -436,17 +395,21 @@ if __name__ == "__main__":
     print ("creating dictionary")
     for k in range(0, len(training_list), 2):        
         add_to_dictionary(training_list[k], compiled_dictionary)
-    print ("size of structured compiled dictionary:")
+
+    
+    print ("size of compiled dictionary:")
     print(len(compiled_dictionary))
     
-    print("creating training file")
-    for k in range(0, len(training_list), 2):        
+
+    print("creating training files")
+    for k in range(0, len(training_list), 2):
         training_files.append(create_message_file(training_list[k], training_list[k+1]))
 
     enumerated_examples = []
     for file in range(len(training_files)):
         for message in range(100, len(training_files[file])):
-            enumerated_examples.append((file, message))
+            for prev_message in range(message):
+                enumerated_examples.append((file, message, prev_message))
 
     create_pairs(enumerated_examples, linked_pairs, training_files)
     print("number of linked pairs is " + str(len(linked_pairs)))
@@ -458,25 +421,25 @@ if __name__ == "__main__":
 
     dummy_feature_vector = generate_features(training_files[0][100], training_files[0][3], training_files[0], compiled_dictionary, linked_pairs)
 
-    weights = numpy.zeros(len(dummy_feature_vector))
+    weights = numpy.zeros(len(dummy_feature_vector), numpy.int16)
+    running_weights = numpy.zeros(len(dummy_feature_vector))
+    running_count = 0
     best_weights = 0
     best_fscore = -1
-
-    # set initial cumulative gradient to small constant value
-    cuml_gradient = numpy.zeros(len(dummy_feature_vector))
-    cuml_gradient.fill(DELTA_CONSTANT);
 
     
     for i in range(EPOCHS):
         print ("\nepoch " + str(i + 1) + " of perceptron training")
-        train_perceptron(weights, cuml_gradient, enumerated_examples, training_files, compiled_dictionary, linked_pairs)
+        running_count = train_perceptron(weights, running_weights, running_count, enumerated_examples, training_files, compiled_dictionary, linked_pairs)
+        print ("running count: " + str(running_count))
         print("\ntesting perceptron and calculating predictions for epoch " + str(i + 1))
-        fscore = calculate_predictions(weights, testing_list, compiled_dictionary, linked_pairs)
+        
+        fscore = calculate_predictions(running_weights, testing_list, compiled_dictionary, linked_pairs)
         if fscore > best_fscore:
-            best_weights = numpy.copy(weights)
+            best_weights = numpy.copy(running_weights)
             best_fscore = fscore
-
-    
+   
+        
    
     #print("testing perceptron and calculating predictions for epoch " + str(i) + "\n")
     #calculate_predictions(weights, sys.argv[len(sys.argv)-2], sys.argv[len(sys.argv)-1], compiled_dictionary)
@@ -485,5 +448,3 @@ if __name__ == "__main__":
     print(best_weights)
     print("\ngenerating annotation files")
     generate_annotation_file(best_weights, benchmark_list, compiled_dictionary, linked_pairs)
-
-    

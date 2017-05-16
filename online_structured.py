@@ -1,4 +1,6 @@
-# implementation of perceptron model for ubuntu disentanglement project
+# implementation of structured perceptron model for ubuntu disentanglement project
+
+EPOCHS = 10
 
 import re
 import random
@@ -98,12 +100,13 @@ def annotation_processing(entries, annotation_file_in):
 
 def generate_features(current_post, prev_post, post_file, compiled_dictionary, linked_pairs):
 
-    features = numpy.zeros(18, bool)
+    # not using feature hashing 
+    features = numpy.zeros(18)
+    if current_post == None:
+        return features;
+    # using feature hashing
     #features = numpy.zeros(18 + 2 * len(linked_pairs), bool)
-    
-    # correct classification held in element zero
-    # features begin at element one
-    
+      
     # bias
     features[0] = 1
     # 'distance' categories
@@ -143,6 +146,7 @@ def generate_features(current_post, prev_post, post_file, compiled_dictionary, l
         features[12] = 1
     else:
         features[13] = 1
+
     # of posts by previous user between current and previous post
     posts_between = 0
     for i in range(1, current_post.postid - prev_post.postid):
@@ -196,6 +200,8 @@ def make_structured_prediction(weights, msg_file, msg_line, compiled_dictionary,
     summation = 0
     max_index = -1
 
+    # pick message pair that generates greatest activation
+    # search done in reverse order so ties are broken in favor of closest message5
     for prev_msg_line in reversed(range(msg_line)):
         features = generate_features(msg_file[msg_line], msg_file[prev_msg_line], msg_file, compiled_dictionary, linked_pairs)
         temp_sum = numpy.dot(weights, features)
@@ -207,6 +213,7 @@ def make_structured_prediction(weights, msg_file, msg_line, compiled_dictionary,
 
 def train_perceptron(weights, enumerated_examples, files, compiled_dictionary, linked_pairs):
 
+    # used for keeping track of training statistics
     correct_matches = 0
     true_pos = 0
     false_pos = 0
@@ -217,23 +224,45 @@ def train_perceptron(weights, enumerated_examples, files, compiled_dictionary, l
     random.shuffle(enumerated_examples)
 
     for i in range(len(enumerated_examples)):
-        if i % 1000 == 0:
+        # print status update at certain intervals
+        if i % ((len(enumerated_examples) - (len(enumerated_examples) % 100)) // 10)  == 0:
             print("training on example " + str(i))
-
+        
         temp_prediction_set = set()
         file_num = enumerated_examples[i][0]
         msg_line = enumerated_examples[i][1]
         num_examples += msg_line
+
+        # generate prediction index
         prediction_index = make_structured_prediction(weights, files[file_num], msg_line, compiled_dictionary, linked_pairs)
         if prediction_index > -1:
             temp_prediction_set.add(prediction_index)
 
         correct_index = -1
         if files[file_num][msg_line].links:
-            correct_index = random.choice(tuple(files[file_num][msg_line].links))
+            if prediction_index in files[file_num][msg_line].links:
+                correct_index = prediction_index
+            else:
+                correct_index = random.choice(tuple(files[file_num][msg_line].links))
         
+        correct_features = 0
+        prediction_features = 0
         
+        if correct_index == -1:
+            correct_features = generate_features(None, None, None, None, None)
+        else: 
+            correct_features = generate_features(files[file_num][msg_line], files[file_num][correct_index], files[file_num], compiled_dictionary, linked_pairs)
+        
+        if prediction_index == -1:
+            prediction_features = generate_features(None, None, None, None, None)
+        else:
+            prediction_features = generate_features(files[file_num][msg_line], files[file_num][prediction_index], files[file_num], compiled_dictionary, linked_pairs)
+
+        weights += correct_features - prediction_features
         #TODO    
+
+
+        '''
         # first incorrect case... where there was a link 
         if files[file_num][msg_line].links and prediction_index not in files[file_num][msg_line].links:
             # false negative
@@ -253,15 +282,16 @@ def train_perceptron(weights, enumerated_examples, files, compiled_dictionary, l
             predicted_features = generate_features(files[file_num][msg_line], files[file_num][prediction_index], files[file_num], compiled_dictionary, linked_pairs)
             weights -= predicted_features
 
+        '''
+
         true_pos += len(temp_prediction_set.intersection(files[file_num][msg_line].links))
         false_pos += len(temp_prediction_set.difference(files[file_num][msg_line].links))
         false_neg += len(files[file_num][msg_line].links.difference(temp_prediction_set))
         true_neg += msg_line - len(temp_prediction_set.union(files[file_num][msg_line].links))
         
         
-            #print(prediction_index)
-            #print(files[file_num][msg_line].links)       
-    print (correct_matches, num_examples, true_pos, false_pos, false_neg, true_neg)
+               
+    
     accuracy = (true_pos + true_neg)/num_examples
     precision = true_pos / (true_pos + false_pos)
     recall = true_pos / (true_pos + false_neg)
@@ -283,7 +313,7 @@ def calculate_predictions(weights, testing_list, compiled_dictionary, linked_pai
 
     for k in range(0, len(testing_list), 2):
 
-        print("Working on test file " + str(k) + " of " + str(len(testing_list)/2))
+        print("Working on test file " + str(k//2 + 1) + " of " + str(len(testing_list)//2))
         test_set = create_message_file(testing_list[k], testing_list[k+1])  
 
         for message in range(100, len(test_set)):
@@ -404,16 +434,15 @@ if __name__ == "__main__":
     # index of every data file from argv
     # command line arguments are in <data_file, annotation_file>
     # pairs with the last pair of files being the test set
-    print(str(len(training_list)) + "Hello")
+    print ("creating dictionary")
     for k in range(0, len(training_list), 2):
-        print ("creating dictionary")
         add_to_dictionary(training_list[k], compiled_dictionary)
 
+    print ("size of structured compiled dictionary:")
     print(len(compiled_dictionary))
-    print ("size of structured compiled dictionary ^^")
+    
 
     for k in range(0, len(training_list), 2):
-        print("creating training file")
         training_files.append(create_message_file(training_list[k], training_list[k+1]))
 
     enumerated_examples = []
@@ -424,7 +453,7 @@ if __name__ == "__main__":
     create_pairs(enumerated_examples, linked_pairs, training_files)
     print("number of linked pairs is " + str(len(linked_pairs)))
     linked_pairs = remove_overfitted_pairs(linked_pairs)    
-    print("number of training examples is" + str(len(enumerated_examples)))
+    print("number of training examples is " + str(len(enumerated_examples)))
     print("number of reduced pairs is " + str(len(linked_pairs)))
     #for line in linked_pairs:
     #    print(line[0] + "\t" + line[1])
@@ -435,11 +464,11 @@ if __name__ == "__main__":
     best_weights = 0
     best_fscore = -1
 
-    epochs = 10
-    for i in range(epochs):
-        print ("\n\nepoch " + str(i + 1) + " of perceptron training")
+    
+    for i in range(EPOCHS):
+        print ("\nepoch " + str(i + 1) + " of perceptron training")
         train_perceptron(weights, enumerated_examples, training_files, compiled_dictionary, linked_pairs)
-        print("testing perceptron and calculating predictions for epoch " + str(i + 1))
+        print("\ntesting perceptron and calculating predictions for epoch " + str(i + 1))
         fscore = calculate_predictions(weights, testing_list, compiled_dictionary, linked_pairs)
         if fscore > best_fscore:
             best_weights = numpy.copy(weights)
@@ -451,8 +480,8 @@ if __name__ == "__main__":
     #calculate_predictions(weights, sys.argv[len(sys.argv)-2], sys.argv[len(sys.argv)-1], compiled_dictionary)
     print("\nrunning perceptron on benchmark files using best weights:")
     calculate_predictions(best_weights, benchmark_list, compiled_dictionary, linked_pairs)
-    print("\ngenerating annotation files")
-    print(best_weights)
+    print("\ngenerating annotation files")  
     generate_annotation_file(best_weights, benchmark_list, compiled_dictionary, linked_pairs)
+    print(best_weights)
 
     

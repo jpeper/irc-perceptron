@@ -1,9 +1,15 @@
-# irc-perceptron
-Repository to hold code for implementation of perceptron model for CLAIR IRC project.
+irc-perceptron
+Repository used to hold 
+Usage:
+<programName.py> <training.list> <testing.list> <finalBenchmark.list>
 
-Command line arguments consists of (data_file, annotation_file) pairs. 
-The final pair is the training set the perceptron upon which the perceptron will make predictions. 
-Predictions on test set are output to 'outputfile.txt'.
+The file lists contain the files names (in pairs consisting of data files followed directly by the corresponding annotation file) of the files used for their respective purposes.
 
-Example command line arguments:
-./perceptron busy.txt busy.annotations samatman_excerpt_0_49.txt samatman_excerpt_0_49.annotations
+Parameters than can be modified within program code: (all parameters are initializd at top of code for easy access)
+Perceptron, Averaged Perceptron, Structured Perceptron: number of epochs:
+AdaGrad Model: number of epochs, learning rate, regularization constant, delta constant
+
+The programs will output the performance metrics for both testing and training after each epoch.
+The programs will then run on the benchmark set using the weights that generated the greatest training fscore.
+A file containing the predicted annotations will be generated for every file in the benchmark set. 
+The files generated will be named according to the following format: <initial_filename>.annotated.<perceptron_type>

@@ -1,5 +1,7 @@
 # implementation of perceptron model for ubuntu disentanglement project
 
+EPOCHS = 10
+
 import re
 import random
 import sys
@@ -189,7 +191,7 @@ def make_prediction(weights, features):
     activation = 0
     if summation > 0:
         activation = 1
-        
+
     return activation
 
 def train_perceptron(weights, enumerated_examples, files, compiled_dictionary, linked_pairs):
@@ -203,6 +205,7 @@ def train_perceptron(weights, enumerated_examples, files, compiled_dictionary, l
     random.shuffle(enumerated_examples)
 
     for i in range(len(enumerated_examples)):
+        # print out status update at certain intervals
         if i % ((len(enumerated_examples) - (len(enumerated_examples) % 1000)) // 10)  == 0:
             print("training on example " + str(i))
         file_num = enumerated_examples[i][0]
@@ -415,8 +418,7 @@ if __name__ == "__main__":
     best_weights = 0
     best_fscore = -1
 
-    epochs = 1
-    for i in range(epochs):
+    for i in range(EPOCHS):
         print ("\nepoch " + str(i + 1) + " of perceptron training")
         train_perceptron(weights, enumerated_examples, training_files, compiled_dictionary, linked_pairs)
         print("Running perceptron on testing set with weights from epoch " + str(i + 1))
